@@ -656,6 +656,26 @@ bool mips_prologue(uint32_t w)
            (op == 0x2b && rs == 29 && rt == 31);  // sw ra, n(sp)
 }
 
+// mips instruction classes the analysis tracks registers over
+bool mips_lui(const insn& in) { return in.mips && in.id == MIPS_INS_LUI && in.has_imm; }
+bool mips_addiu(const insn& in)
+{
+    return in.mips && (in.id == MIPS_INS_ADDIU || in.id == MIPS_INS_ADDI) && in.has_imm;
+}
+bool mips_ori(const insn& in) { return in.mips && in.id == MIPS_INS_ORI && in.has_imm; }
+bool mips_xori(const insn& in) { return in.mips && in.id == MIPS_INS_XORI && in.has_imm; }
+bool mips_andi(const insn& in) { return in.mips && in.id == MIPS_INS_ANDI && in.has_imm; }
+bool mips_addu(const insn& in) { return in.mips && (in.id == MIPS_INS_ADDU || in.id == MIPS_INS_ADD); }
+bool mips_subu(const insn& in) { return in.mips && (in.id == MIPS_INS_SUBU || in.id == MIPS_INS_SUB); }
+bool mips_move(const insn& in) { return in.mips && in.id == MIPS_INS_MOVE; }
+bool mips_lw(const insn& in) { return in.mips && in.id == MIPS_INS_LW; }
+bool mips_slti(const insn& in)
+{
+    return in.mips && (in.id == MIPS_INS_SLTI || in.id == MIPS_INS_SLTIU) && in.has_imm;
+}
+bool mips_sll(const insn& in) { return in.mips && in.id == MIPS_INS_SLL && in.has_imm; }
+bool mips_sllv(const insn& in) { return in.mips && in.id == MIPS_INS_SLLV; }
+
 bool mips_gap_before(uint32_t w)
 {
     if (w == 0)

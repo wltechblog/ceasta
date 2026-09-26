@@ -141,4 +141,17 @@ bool a64_gap_before(uint32_t word); // ret, b, br, nop, brk, zero: what comes be
 // mips only
 bool mips_prologue(uint32_t word);   // addiu sp, sp, -n / sw ra, n(sp)
 bool mips_gap_before(uint32_t word); // jr ra, b, break, sdbbp, zero
+// mips instruction classes the analysis tracks registers over
+bool mips_lui(const insn& in);
+bool mips_addiu(const insn& in);
+bool mips_ori(const insn& in);
+bool mips_xori(const insn& in);
+bool mips_andi(const insn& in);
+bool mips_addu(const insn& in);
+bool mips_subu(const insn& in);
+bool mips_move(const insn& in);
+bool mips_lw(const insn& in);
+bool mips_slti(const insn& in);
+bool mips_sll(const insn& in);
+bool mips_sllv(const insn& in);
 }
