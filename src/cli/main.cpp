@@ -377,8 +377,12 @@ int main(int argc, char** argv)
         return 0;
     }
     if (cmd == "imports") {
-        for (const import_entry& e : b.imports)
-            printf("%s  %s!%s\n", db.fmt_addr(e.slot).c_str(), e.lib.empty() ? "?" : e.lib.c_str(), e.name.c_str());
+        for (const import_entry& e : b.imports) {
+            if (e.lib.empty())
+                printf("%s  %s\n", db.fmt_addr(e.slot).c_str(), e.name.c_str());
+            else
+                printf("%s  %s!%s\n", db.fmt_addr(e.slot).c_str(), e.lib.c_str(), e.name.c_str());
+        }
         return 0;
     }
     if (cmd == "exports") {

@@ -543,6 +543,12 @@ struct worker {
             st.v[31] = (uint32_t)(in.addr + 8); // delay slots: the return address is addr + 8
             st.clob = 1;
         }
+        // o32: $gp is a program constant (the code reloads it from the frame after calls,
+        // which only restores the same value) — whatever ran, it stays known
+        if (gp_known) {
+            st.k[28] = 1;
+            st.v[28] = gp_value;
+        }
     }
 
     void mips_hand_over(uint64_t target, const mips_state& st)
@@ -1853,9 +1859,13 @@ struct worker {
         }
 
         int ps = b.ptr_size();
-        if (mips && b.has_entry && b.format != bin_format::raw) {
-            // pic mips binaries keep $gp on one constant for the whole program: read the
-            // lui / addiu pair that sets it up at the entry
+        if (mips && b.mips_gp) {
+            // pic mips: $gp is the same constant in every function, and the loader knows it
+            gp_value = (uint32_t)b.mips_gp;
+            gp_known = true;
+        } else if (mips && b.has_entry && b.format != bin_format::raw) {
+            // no loader answer (a raw blob or an odd file): read the lui / addiu pair at the
+            // entry, where the c runtime sets $gp up
             mips_state st0;
             uint64_t a = b.entry;
             for (int i = 0; i < 64; i++, a += 4) {

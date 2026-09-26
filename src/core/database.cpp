@@ -1,4 +1,5 @@
 #include "core/database.h"
+#include "core/disasm.h"
 #include "core/os.h"
 #include "core/util.h"
 #include <algorithm>
@@ -565,7 +566,23 @@ void database::note_args(const function& f)
         const prototype* p = nullptr;
         if (call.has_target && !call.indirect)
             p = callee_proto(call.target);
-        else if (call.has_mem && !call.is_lea) // call [__imp_CreateFileW]
+        else if (mips && call.indirect && bin.mips_gp) {
+            // jalr t9: the got slot it calls through was loaded by a nearby lw t9, got16(gp)
+            int cr = regs::mips_num(call.reg0);
+            for (size_t j = i; j-- > 0 && i - j <= 8;) {
+                insn in;
+                if (!decode(heads[j], in) || in.kind != flow::normal)
+                    break;
+                if (ins::mips_lw(in) && regs::mips_num(in.reg0) == cr &&
+                    regs::mips_num(in.mem_base) == 28) {
+                    call.has_mem = true;
+                    call.mem = (bin.mips_gp + (int32_t)in.mem_disp) & 0xffffffffull;
+                    break;
+                }
+            }
+            if (call.has_mem)
+                p = known_prototype(name_at(call.mem));
+        } else if (call.has_mem && !call.is_lea) // call [__imp_CreateFileW]
             p = known_prototype(name_at(call.mem));
         if (!p || p->params.empty())
             continue;
@@ -1038,8 +1055,8 @@ void database::format(const row& r, line_text& out)
             if (pr != an.page_refs.end())
                 out.target = pr->second;
         }
-        if (in.arm && in.has_mem && bin.is_mapped(in.mem) && !an.string_at(in.mem)) {
-            // blr x8 through a slot: what it calls. an address the text couldn't name: where it is
+        if ((in.arm || in.mips) && in.has_mem && bin.is_mapped(in.mem) && !an.string_at(in.mem)) {
+            // blr x8 / jalr t9 through a slot: what it calls. an address the text couldn't name: where it is
             std::string n = name_at(in.mem);
             if (in.is_branch() || n.empty() || out.text.find(n) == std::string::npos)
                 out.auto_comment = location(in.mem);

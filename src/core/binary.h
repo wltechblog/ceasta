@@ -70,6 +70,8 @@ struct binary {
     // the file lists every function start (mach-o LC_FUNCTION_STARTS): code found any other way
     // (a switch case nobody resolved, a pointer into the middle) is part of the function around it
     bool starts_complete = false;
+    // mips pic: the $gp value the runtime linker sets up (got + 0x7ff0), 0 when unknown
+    uint64_t mips_gp = 0;
     std::vector<uint8_t> file;            // raw file bytes
     // a universal (fat) mach-o file: the architectures in it, and where the loaded one is in file
     std::vector<bin_arch> slices;
