@@ -7,6 +7,9 @@
 
 // thin wrapper over capstone. not thread safe, use one per thread.
 
+// whether the listing decodes this architecture yet (mips loads as data-only for now)
+bool arch_decodable(bin_arch arch);
+
 enum class flow : uint8_t {
     normal,  // falls through to the next instruction
     jump,    // unconditional jump

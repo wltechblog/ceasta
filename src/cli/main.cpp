@@ -57,6 +57,7 @@ static void usage()
            "options:\n"
            "  --raw32 / --raw64             load the file as raw x86 / x64 code\n"
            "  --raw-arm64                   load the file as raw arm64 code\n"
+           "  --raw-mips                    load the file as raw mips32 (little endian) code\n"
            "  --base <hex>                  base address for raw files\n"
            "  --arch x64|arm64              which part of a universal (fat) mach-o file to open\n"
            "                                (default: x64 when it has one, the decompiler reads it)\n"
@@ -274,9 +275,12 @@ int main(int argc, char** argv)
         } else if (a == "--kuna-path" && i + 1 < argc) {
             use_kuna = true;
             kuna_path = argv[++i];
-        } else if (a == "--raw32" || a == "--raw64" || a == "--raw-arm64") {
+        } else if (a == "--raw32" || a == "--raw64" || a == "--raw-arm64" || a == "--raw-mips") {
             opts.force_raw = true;
-            opts.raw_arch = a == "--raw32" ? bin_arch::x86 : a == "--raw64" ? bin_arch::x64 : bin_arch::arm64;
+            opts.raw_arch = a == "--raw32" ? bin_arch::x86
+                          : a == "--raw64" ? bin_arch::x64
+                          : a == "--raw-mips" ? bin_arch::mips
+                                              : bin_arch::arm64;
         } else if (a == "--arch" && i + 1 < argc) {
             opts.has_slice = true;
             if (!parse_arch(argv[++i], opts.slice)) {

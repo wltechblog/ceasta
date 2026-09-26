@@ -22,9 +22,16 @@ void disassembler::close()
     }
 }
 
+bool arch_decodable(bin_arch arch)
+{
+    return arch != bin_arch::mips;
+}
+
 bool disassembler::open(bin_arch arch)
 {
     close();
+    if (arch == bin_arch::mips)
+        return false; // mips decode lands with the mips analysis pass
     csh h = 0;
     cs_err e = arch == bin_arch::arm64 ? cs_open(CS_ARCH_ARM64, CS_MODE_ARM, &h)
                                        : cs_open(CS_ARCH_X86, arch == bin_arch::x64 ? CS_MODE_64 : CS_MODE_32, &h);

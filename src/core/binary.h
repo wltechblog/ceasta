@@ -6,7 +6,7 @@
 // one loaded file, format independent. pe/elf/mach-o/raw loaders fill this in.
 
 enum class bin_format { none, pe, elf, raw, macho };
-enum class bin_arch { x86, x64, arm64 };
+enum class bin_arch { x86, x64, arm64, mips };
 
 constexpr uint32_t perm_r = 1;
 constexpr uint32_t perm_w = 2;
@@ -76,10 +76,10 @@ struct binary {
     uint64_t slice_off = 0;
     uint64_t slice_size = 0;              // 0: not a slice, the whole file
 
-    int ptr_size() const { return arch == bin_arch::x86 ? 4 : 8; }
-    bool is64() const { return arch != bin_arch::x86; }
+    int ptr_size() const { return arch == bin_arch::x86 || arch == bin_arch::mips ? 4 : 8; }
+    bool is64() const { return arch == bin_arch::x64 || arch == bin_arch::arm64; }
     // x86 or x64: what the decompiler, the debugger and the signatures understand
-    bool is_x86() const { return arch != bin_arch::arm64; }
+    bool is_x86() const { return arch == bin_arch::x86 || arch == bin_arch::x64; }
     const segment* seg_at(uint64_t a) const;
     bool is_code(uint64_t a) const;
     bool is_mapped(uint64_t a) const { return seg_at(a) != nullptr; }

@@ -23,6 +23,7 @@ const char* arch_name(bin_arch a)
     switch (a) {
     case bin_arch::x86: return "x86";
     case bin_arch::arm64: return "arm64";
+    case bin_arch::mips: return "mips";
     default: return "x64";
     }
 }
@@ -35,6 +36,8 @@ bool parse_arch(const std::string& s, bin_arch& out)
         out = bin_arch::x64;
     else if (s == "arm64" || s == "aarch64")
         out = bin_arch::arm64;
+    else if (s == "mips" || s == "mips32" || s == "mipsel")
+        out = bin_arch::mips;
     else
         return false;
     return true;

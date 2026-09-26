@@ -1,4 +1,5 @@
 #include "core/database.h"
+#include "core/disasm.h"
 #include "core/os.h"
 #include "core/util.h"
 #include <algorithm>
@@ -1369,6 +1370,9 @@ std::unique_ptr<database> open_database(const std::string& path, const load_opti
         err = (progress && progress->cancel.load()) ? "cancelled" : "analysis failed";
         return nullptr;
     }
+    if (!arch_decodable(db->bin.arch))
+        db->bin.notes.push_back(std::string(arch_name(db->bin.arch)) +
+                                " code isn't decoded yet: the listing is data and strings only");
     db->build();
     db->info = inspect(db->bin);
     db->project_file = opts.project;

@@ -1402,8 +1402,9 @@ struct worker {
         arm = b.arch == bin_arch::arm64;
         imm_refs = (b.format == bin_format::pe || b.format == bin_format::elf || b.format == bin_format::macho) &&
                    b.base >= 0x10000;
-        if (!dis.open(b.arch))
-            return false;
+        // an architecture the listing can't decode yet: every decode fails and the passes
+        // below just find no code — the file still opens as data and strings
+        dis.open(b.arch);
         an = analysis();
         for (const segment& s : b.segments) {
             an.seg_start.push_back(s.start);
