@@ -7,9 +7,6 @@
 
 // thin wrapper over capstone. not thread safe, use one per thread.
 
-// whether the listing decodes this architecture yet (mips loads as data-only for now)
-bool arch_decodable(bin_arch arch);
-
 enum class flow : uint8_t {
     normal,  // falls through to the next instruction
     jump,    // unconditional jump
@@ -47,6 +44,10 @@ struct insn {
 
     // arm64. registers are numbered for the fields below: x0..x30 (and w0..w30) are 0..30, sp 31
     bool arm = false;
+    // mips32. registers: $0..$31 (a64_num's mips twin). branches have delay slots: the
+    // instruction after a taken branch runs before the branch takes effect, and jal / bal
+    // leave their return address at addr + 8, not next()
+    bool mips = false;
     bool has_page = false;      // adrp: reg0 gets the 4 KB page "page"
     uint64_t page = 0;
     unsigned reg2 = 0;          // third register operand (add x0, x1, w2, sxtw #2)
@@ -90,6 +91,7 @@ public:
 private:
     void close();
     bool decode_arm64(const uint8_t* buf, size_t n, uint64_t addr, insn& out);
+    bool decode_mips(const uint8_t* buf, size_t n, uint64_t addr, insn& out);
     size_t handle_ = 0;        // csh
     void* scratch_ = nullptr;  // cs_insn from cs_malloc
     bin_arch arch_ = bin_arch::x64;
@@ -106,6 +108,8 @@ unsigned ebx();
 bool same_reg(unsigned a, unsigned b); // eax vs rax etc count as the same register
 // arm64: the number of a general register (w5 and x5 are 5, sp is 31), -1 for anything else
 int a64_num(unsigned reg);
+// mips: the number of a general register ($5 is 5), -1 for anything else
+int mips_num(unsigned reg);
 }
 
 namespace ins {
@@ -134,4 +138,7 @@ bool a64_bls(const insn& in);       // b.ls: unsigned lower or same
 bool a64_blo(const insn& in);       // b.lo / b.cc: unsigned lower
 bool a64_prologue(uint32_t word);   // stp x29, x30, [sp, #-n]! / sub sp, sp, #n / paciasp / bti c
 bool a64_gap_before(uint32_t word); // ret, b, br, nop, brk, zero: what comes before a function
+// mips only
+bool mips_prologue(uint32_t word);   // addiu sp, sp, -n / sw ra, n(sp)
+bool mips_gap_before(uint32_t word); // jr ra, b, break, sdbbp, zero
 }

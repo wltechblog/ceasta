@@ -22,18 +22,12 @@ void disassembler::close()
     }
 }
 
-bool arch_decodable(bin_arch arch)
-{
-    return arch != bin_arch::mips;
-}
-
 bool disassembler::open(bin_arch arch)
 {
     close();
-    if (arch == bin_arch::mips)
-        return false; // mips decode lands with the mips analysis pass
     csh h = 0;
-    cs_err e = arch == bin_arch::arm64 ? cs_open(CS_ARCH_ARM64, CS_MODE_ARM, &h)
+    cs_err e = arch == bin_arch::mips ? cs_open(CS_ARCH_MIPS, (cs_mode)(CS_MODE_MIPS32 | CS_MODE_LITTLE_ENDIAN), &h)
+                                      : arch == bin_arch::arm64 ? cs_open(CS_ARCH_ARM64, CS_MODE_ARM, &h)
                                        : cs_open(CS_ARCH_X86, arch == bin_arch::x64 ? CS_MODE_64 : CS_MODE_32, &h);
     if (e != CS_ERR_OK)
         return false;
@@ -67,6 +61,8 @@ bool disassembler::decode(const uint8_t* buf, size_t n, uint64_t addr, insn& out
     out = insn();
     if (!handle_ || !buf || n == 0)
         return false;
+    if (arch_ == bin_arch::mips)
+        return decode_mips(buf, n, addr, out);
     if (arch_ == bin_arch::arm64)
         return decode_arm64(buf, n, addr, out);
     const uint8_t* code = buf;
@@ -345,6 +341,163 @@ bool disassembler::decode_arm64(const uint8_t* buf, size_t n, uint64_t addr, ins
     return true;
 }
 
+// ---- mips32 (little endian) ----
+
+namespace {
+
+// bytes a load or store of this instruction moves, 0 when it touches no memory
+unsigned mips_mem_size(unsigned id)
+{
+    switch (id) {
+    case MIPS_INS_LB: case MIPS_INS_LBU: case MIPS_INS_SB:
+        return 1;
+    case MIPS_INS_LH: case MIPS_INS_LHU: case MIPS_INS_SH:
+        return 2;
+    case MIPS_INS_LW: case MIPS_INS_SW: case MIPS_INS_LWL: case MIPS_INS_LWR:
+    case MIPS_INS_LWC1: case MIPS_INS_SWC1: case MIPS_INS_LL: case MIPS_INS_SC:
+        return 4;
+    case MIPS_INS_LDC1: case MIPS_INS_SDC1:
+        return 8;
+    default:
+        return 0;
+    }
+}
+
+bool mips_is_store(unsigned id)
+{
+    switch (id) {
+    case MIPS_INS_SB: case MIPS_INS_SH: case MIPS_INS_SW: case MIPS_INS_SWL: case MIPS_INS_SWR:
+    case MIPS_INS_SC: case MIPS_INS_SWC1: case MIPS_INS_SDC1:
+        return true;
+    default:
+        return false;
+    }
+}
+
+} // namespace
+
+bool disassembler::decode_mips(const uint8_t* buf, size_t n, uint64_t addr, insn& out)
+{
+    if (n < 4 || (addr & 3))
+        return false;
+    const uint8_t* code = buf;
+    size_t size = 4;
+    uint64_t a = addr;
+    cs_insn* ci = (cs_insn*)scratch_;
+    if (!cs_disasm_iter((csh)handle_, &code, &size, &a, ci))
+        return false;
+    out.mips = true;
+    out.addr = addr;
+    out.size = 4;
+    memcpy(out.bytes, ci->bytes, 4);
+    out.id = ci->id;
+    snprintf(out.mnem, sizeof(out.mnem), "%s", ci->mnemonic);
+    snprintf(out.ops, sizeof(out.ops), "%s", ci->op_str);
+    const cs_mips& x = ci->detail->mips;
+    unsigned id = ci->id;
+
+    bool store = mips_is_store(id);
+    bool links = false; // writes ra whatever the branch does (bal, bltzal / bgezal)
+    switch (id) {
+    case MIPS_INS_BAL: case MIPS_INS_BLTZAL: case MIPS_INS_BGEZAL:
+    case MIPS_INS_BLTZALL: case MIPS_INS_BGEZALL:
+        // bal is bgezal $zero; a real bltzal / bgezal branches conditionally
+        out.kind = id == MIPS_INS_BAL || (x.op_count && x.operands[0].type == MIPS_OP_REG &&
+                                          x.operands[0].reg == MIPS_REG_ZERO)
+                       ? flow::call
+                       : flow::cond;
+        links = true;
+        break;
+    case MIPS_INS_JAL:
+        out.kind = flow::call;
+        links = true;
+        break;
+    case MIPS_INS_JALR:
+        out.kind = flow::call;
+        out.indirect = true;
+        break;
+    case MIPS_INS_JR:
+        // jr $ra ends a function
+        out.kind = x.op_count == 1 && x.operands[0].type == MIPS_OP_REG && x.operands[0].reg == MIPS_REG_RA
+                       ? flow::ret
+                       : flow::jump;
+        out.indirect = true;
+        break;
+    case MIPS_INS_J: case MIPS_INS_B:
+        out.kind = flow::jump;
+        break;
+    case MIPS_INS_BEQ: case MIPS_INS_BNE: case MIPS_INS_BLEZ: case MIPS_INS_BGTZ:
+    case MIPS_INS_BLTZ: case MIPS_INS_BGEZ: case MIPS_INS_BEQL: case MIPS_INS_BNEL:
+    case MIPS_INS_BLEZL: case MIPS_INS_BGTZL: case MIPS_INS_BLTZL: case MIPS_INS_BGEZL:
+        out.kind = flow::cond;
+        break;
+    case MIPS_INS_BREAK: case MIPS_INS_SDBBP: case MIPS_INS_SDBBP16:
+        out.kind = flow::stop; // traps nobody comes back from in normal flow
+        break;
+    case MIPS_INS_WAIT: case MIPS_INS_ERET: case MIPS_INS_DERET:
+        out.kind = flow::stop;
+        break;
+    default:
+        break;
+    }
+    bool branch = out.kind == flow::jump || out.kind == flow::cond ||
+                  (out.kind == flow::call && id != MIPS_INS_JALR);
+
+    int regs_seen = 0;
+    for (uint8_t i = 0; i < x.op_count && i < 8; i++) {
+        const cs_mips_op& op = x.operands[i];
+        if (op.type == MIPS_OP_REG) {
+            if (regs_seen == 0)
+                out.reg0 = op.reg;
+            else if (regs_seen == 1)
+                out.reg1 = op.reg;
+            else if (regs_seen == 2)
+                out.reg2 = op.reg;
+            regs_seen++;
+        } else if (op.type == MIPS_OP_IMM) {
+            if (branch && id != MIPS_INS_JALR) {
+                out.has_target = true;
+                out.target = (uint64_t)op.imm & 0xffffffffull;
+            } else if (!out.has_imm) {
+                out.has_imm = true;
+                // lui's immediate is the high half of the constant the pair builds
+                out.imm = ((uint64_t)op.imm << (id == MIPS_INS_LUI ? 16 : 0)) & 0xffffffffull;
+            }
+        } else if (op.type == MIPS_OP_MEM) {
+            out.has_mem_op = true;
+            out.mem_base = op.mem.base;
+            out.mem_index = 0;
+            out.mem_scale = 0;
+            out.mem_disp = (int64_t)op.mem.disp;
+            out.mem_write = store;
+        }
+    }
+    unsigned msz = mips_mem_size(id);
+    if (out.has_mem_op && msz) {
+        out.mem_size = (uint8_t)msz;
+        if (!store) {
+            out.mem_write = false;
+            // lb, lh, lwl sign extend
+            out.mem_signed = id == MIPS_INS_LB || id == MIPS_INS_LH || id == MIPS_INS_LWL;
+        }
+    } else if (out.has_mem_op) {
+        out.has_mem_op = false; // a memory operand we know nothing about
+        out.mem_base = 0;
+        out.mem_disp = 0;
+    }
+    // what it writes: the first register operand, when that's a destination (jal / bal write ra)
+    if (!branch && !store && x.op_count && x.operands[0].type == MIPS_OP_REG) {
+        int r = regs::mips_num(x.operands[0].reg);
+        if (r >= 0 && out.nwr < 3)
+            out.wr[out.nwr++] = (uint8_t)r;
+    }
+    if (links && id != MIPS_INS_JALR && out.nwr < 3)
+        out.wr[out.nwr++] = (uint8_t)regs::mips_num(MIPS_REG_RA);
+    if (out.indirect)
+        out.has_target = false;
+    return true;
+}
+
 bool disassembler::decode(const binary& b, uint64_t addr, insn& out)
 {
     uint8_t buf[16];
@@ -404,14 +557,24 @@ int a64_num(unsigned r)
     }
 }
 
+int mips_num(unsigned r)
+{
+    if (r >= MIPS_REG_0 && r <= MIPS_REG_31)
+        return (int)(r - MIPS_REG_0);
+    return -1;
+}
+
 }
 
 namespace ins {
 
-bool is_nop(const insn& in) { return in.arm ? in.id == ARM64_INS_NOP : in.id == X86_INS_NOP; }
+bool is_nop(const insn& in)
+{
+    return in.mips ? in.id == MIPS_INS_NOP : in.arm ? in.id == ARM64_INS_NOP : in.id == X86_INS_NOP;
+}
 bool is_endbr(const insn& in)
 {
-    return in.arm ? in.id == ARM64_INS_BTI : in.id == X86_INS_ENDBR64 || in.id == X86_INS_ENDBR32;
+    return in.mips ? false : in.arm ? in.id == ARM64_INS_BTI : in.id == X86_INS_ENDBR64 || in.id == X86_INS_ENDBR32;
 }
 bool is_movsxd(const insn& in) { return !in.arm && in.id == X86_INS_MOVSXD; }
 bool is_move(const insn& in)
@@ -426,6 +589,16 @@ bool is_push(const insn& in) { return !in.arm && in.id == X86_INS_PUSH; }
 
 bool is_suspicious(const insn& in)
 {
+    if (in.mips) {
+        switch (in.id) {
+        case MIPS_INS_MFC0: case MIPS_INS_MTC0: case MIPS_INS_ERET: case MIPS_INS_DERET:
+        case MIPS_INS_WAIT: case MIPS_INS_DI: case MIPS_INS_EI: case MIPS_INS_CACHE:
+        case MIPS_INS_SDBBP: case MIPS_INS_BREAK:
+            return true;
+        default:
+            return false;
+        }
+    }
     if (in.arm) {
         switch (in.id) {
         case ARM64_INS_HVC: case ARM64_INS_SMC: case ARM64_INS_ERET: case ARM64_INS_ERETAA: case ARM64_INS_ERETAB:
@@ -476,6 +649,24 @@ bool a64_gap_before(uint32_t w)
            (w & 0xffe0001f) == 0xd4200000;                                  // brk
 }
 
+bool mips_prologue(uint32_t w)
+{
+    unsigned op = w >> 26, rs = (w >> 21) & 31, rt = (w >> 16) & 31;
+    return (op == 9 && rs == 29 && rt == 29) ||   // addiu sp, sp, n
+           (op == 0x2b && rs == 29 && rt == 31);  // sw ra, n(sp)
+}
+
+bool mips_gap_before(uint32_t w)
+{
+    if (w == 0)
+        return true;                                 // nop, or zero padding
+    unsigned op = w >> 26, rs = (w >> 21) & 31, fn = w & 0x3f;
+    return (op == 0 && rs == 31 && fn == 8) ||       // jr ra
+           (op == 4 && rs == 0 && ((w >> 16) & 31) == 0) || // b offset
+           (op == 0 && fn == 0x0d) ||               // break
+           (op == 0x1f && (w & 0x3f) == 0x3f);      // sdbbp
+}
+
 }
 
 // ---- what an instruction writes (for undoing steps) ----
@@ -523,7 +714,7 @@ bool disassembler::writes(const uint8_t* buf, size_t n, uint64_t addr,
     const std::function<bool(const char* reg, uint64_t& value)>& reg, std::vector<mem_write>& out)
 {
     out.clear();
-    if (!handle_ || !buf || n == 0 || arch_ == bin_arch::arm64)
+    if (!handle_ || !buf || n == 0 || arch_ != bin_arch::x86)
         return false;
     const uint8_t* code = buf;
     size_t size = std::min<size_t>(n, 15);

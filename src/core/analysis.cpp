@@ -179,6 +179,7 @@ struct worker {
     bool imm_refs = false;
     bool cancelled = false;
     bool arm = false;                             // arm64: 4 byte instructions, the a64_ state below
+    bool mips = false;                            // mips32: 4 byte instructions, delay slots
 
     // arm64: what registers hold while walking code. kind 1: an address (adrp, adr, add),
     // kind 2: the value loaded from the address v (a pointer slot, like a got entry)
@@ -236,7 +237,7 @@ struct worker {
 
     void add_func(uint64_t a, bool weak = false)
     {
-        if (!code_at(a) || (arm && (a & 3)))
+        if (!code_at(a) || ((arm || mips) && (a & 3)))
             return;
         if (weak && b.starts_complete && !func_starts.count(a)) {
             if (!(an.flags_at(a) & fl_code)) {
@@ -256,7 +257,7 @@ struct worker {
 
     void push_code(uint64_t a)
     {
-        if (code_at(a) && !(arm && (a & 3)))
+        if (code_at(a) && !((arm || mips) && (a & 3)))
             work.push_back(a);
     }
 
@@ -487,8 +488,16 @@ struct worker {
             data_cand.emplace(a, size);
     }
 
-    // "call $+5; pop reg" is how 32 bit code reads eip, not a call to a function
-    static bool get_pc_call(const insn& in) { return in.kind == flow::call && in.has_target && in.target == in.next(); }
+    // "call $+5; pop reg" is how 32 bit code reads eip, not a call to a function. mips's
+    // "bal to the delay slot or the next line" does the same with ra
+    static bool get_pc_call(const insn& in)
+    {
+        if (in.kind != flow::call || !in.has_target)
+            return false;
+        if (in.mips)
+            return in.target == in.next() || in.target == in.next() + 4;
+        return in.target == in.next();
+    }
 
     void refs(const insn& in)
     {
@@ -936,8 +945,13 @@ struct worker {
             default:
                 break;
             }
-            if (stop)
+            if (stop) {
+                // mips: the instruction in a taken branch's delay slot runs before the branch
+                // takes effect, so it's code this walk would otherwise never reach
+                if (mips && (in.kind == flow::jump || in.kind == flow::ret || in.kind == flow::call))
+                    mark_delay_slot(in.next());
                 return;
+            }
             if (nh == hist_max) {
                 for (int i = 1; i < hist_max; i++) {
                     hist[i - 1] = hist[i];
@@ -955,6 +969,22 @@ struct worker {
             hist[nh++] = in;
             a = in.next();
         }
+    }
+
+    // mips delay slot: decode and mark one instruction without following it
+    void mark_delay_slot(uint64_t a)
+    {
+        if (!code_at(a) || (an.flags_at(a) & (fl_code | fl_tail | fl_str | fl_data)) || (a & 3))
+            return;
+        insn in;
+        if (!dis.decode(b, a, in) || !code_at(a + in.size - 1))
+            return;
+        for (uint32_t k = 1; k < in.size; k++)
+            if (an.flags_at(a + k) & (fl_code | fl_tail | fl_str | fl_data))
+                return;
+        mark_item(a, in.size, fl_code);
+        an.insn_count++;
+        refs(in);
     }
 
     void run_work()
@@ -1036,6 +1066,16 @@ struct worker {
                 }
                 continue;
             }
+            if (mips) {
+                for (size_t off = (size_t)((4 - (s.start & 3)) & 3); off + 4 <= d.size(); off += 4) {
+                    if (fl[off] || !ins::mips_prologue(util::rd32(&d[off])))
+                        continue;
+                    if (off >= 4 && !fl[off - 4] && !ins::mips_gap_before(util::rd32(&d[off - 4])))
+                        continue;
+                    add_func(s.start + off, true);
+                }
+                continue;
+            }
             for (size_t off = 0; off < d.size(); off++) {
                 if (fl[off])
                     continue;
@@ -1101,10 +1141,11 @@ struct worker {
 
     uint64_t skip_padding(uint64_t p, uint64_t lim)
     {
-        if (arm) {
+        if (arm || mips) {
             p = (p + 3) & ~3ull;
             uint32_t w;
-            while (p + 4 <= lim && b.read_u32(p, w) && (w == 0 || w == 0xd503201f)) // zeros, nop
+            while (p + 4 <= lim && b.read_u32(p, w) &&
+                   (w == 0 || (arm && w == 0xd503201f))) // zeros, nop (arm also: nop hint)
                 p += 4;
             return std::min(p, lim);
         }
@@ -1136,9 +1177,9 @@ struct worker {
                 return false;
             if (ins::is_suspicious(in) || in.kind == flow::stop)
                 return false;
-            if (!arm && in.size >= 2 && in.bytes[0] == 0 && in.bytes[1] == 0 && ++zero_ops >= 2)
+            if (!arm && !mips && in.size >= 2 && in.bytes[0] == 0 && in.bytes[1] == 0 && ++zero_ops >= 2)
                 return false; // runs of "add [rax], al" are zeros, not code
-            if (!arm && i == 0 && in.bytes[0] == 0)
+            if (!arm && !mips && i == 0 && in.bytes[0] == 0)
                 return false;
             if (in.kind == flow::ret || in.kind == flow::jump)
                 return i >= 1;
@@ -1400,6 +1441,7 @@ struct worker {
     {
         mask = b.is64() ? ~0ull : 0xffffffffull;
         arm = b.arch == bin_arch::arm64;
+        mips = b.arch == bin_arch::mips;
         imm_refs = (b.format == bin_format::pe || b.format == bin_format::elf || b.format == bin_format::macho) &&
                    b.base >= 0x10000;
         // an architecture the listing can't decode yet: every decode fails and the passes

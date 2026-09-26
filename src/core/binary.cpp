@@ -267,9 +267,9 @@ bool peek_arch(const std::string& path, bin_arch& out)
     size_t n = head.size();
     if (n >= 20 && memcmp(h, "\x7f" "ELF", 4) == 0) {
         uint16_t m = (uint16_t)(h[18] | h[19] << 8);
-        if (m != 3 && m != 62 && m != 183)
+        if (m != 3 && m != 62 && m != 183 && m != 8)
             return false;
-        out = m == 3 ? bin_arch::x86 : m == 62 ? bin_arch::x64 : bin_arch::arm64;
+        out = m == 3 ? bin_arch::x86 : m == 62 ? bin_arch::x64 : m == 8 ? bin_arch::mips : bin_arch::arm64;
         return true;
     }
     if (n >= 0x40 && h[0] == 'M' && h[1] == 'Z') {

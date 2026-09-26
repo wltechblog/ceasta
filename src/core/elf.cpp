@@ -141,7 +141,9 @@ void read_relocs(ctx& c)
             continue;
         bool rela = rs.type == sht_rela;
         uint64_t es = c.is64 ? (rela ? 24 : 16) : (rela ? 12 : 8);
-        // glob_dat, jump_slot and relative: 6, 7, 8 on x86 and x64, 1025, 1026, 1027 on arm64
+        // glob_dat, jump_slot and relative: 6, 7, 8 on x86 and x64, 1025, 1026, 1027 on arm64,
+        // and on mips only rel32 (3) and jump_slot (127) exist
+        bool mips = b.arch == bin_arch::mips;
         uint32_t t0 = b.arch == bin_arch::arm64 ? 1025 : 6;
         uint64_t count = std::min<uint64_t>(rs.size / es, 1u << 20);
         for (uint64_t i = 0; i < count; i++) {
@@ -167,11 +169,11 @@ void read_relocs(ctx& c)
                 type = (uint32_t)(info & 0xff);
                 symi = info >> 8;
             }
-            if ((type == t0 || type == t0 + 1) && symi != 0) {
+            if ((mips ? type == 127 : type == t0 || type == t0 + 1) && symi != 0) {
                 elf_sym s;
                 if (c.sym(symtab, symi, s) && s.shndx == 0 && !s.name.empty())
                     b.imports.push_back({std::string(), s.name, where});
-            } else if (type == t0 + 2) {
+            } else if (mips ? type == 3 : type == t0 + 2) {
                 // R_*_RELATIVE: we load at the link address, so the pointer is just the addend.
                 // lld leaves zeros in rela targets, write the value so data reads right
                 uint64_t target = (uint64_t)addend;
@@ -419,6 +421,8 @@ bool elf(binary& b, std::string& err)
         b.arch = bin_arch::x86;
     else if (machine == 183 && is64)
         b.arch = bin_arch::arm64;
+    else if (machine == 8 && !is64)
+        b.arch = bin_arch::mips; // mips32, little endian
     else {
         err = util::fmt("unsupported elf machine %u (x86, x64 and arm64 are supported)", machine);
         return false;
