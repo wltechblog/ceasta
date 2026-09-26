@@ -92,6 +92,7 @@ private:
     void close();
     bool decode_arm64(const uint8_t* buf, size_t n, uint64_t addr, insn& out);
     bool decode_mips(const uint8_t* buf, size_t n, uint64_t addr, insn& out);
+    bool decode_mxu(uint32_t word, insn& out); // xburst simd, special2 space
     size_t handle_ = 0;        // csh
     void* scratch_ = nullptr;  // cs_insn from cs_malloc
     bin_arch arch_ = bin_arch::x64;
