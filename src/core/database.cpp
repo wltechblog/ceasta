@@ -555,6 +555,7 @@ void database::note_args(const function& f)
         a += sz ? sz : 1;
     }
     bool pe = bin.format == bin_format::pe, x64 = bin.is64(), a64 = bin.arch == bin_arch::arm64;
+    bool mips = bin.arch == bin_arch::mips;
     static const char* const win64[] = {"rcx", "rdx", "r8", "r9"};
     static const char* const sysv[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
     for (size_t i = 0; i < heads.size(); i++) {
@@ -568,8 +569,17 @@ void database::note_args(const function& f)
             p = known_prototype(name_at(call.mem));
         if (!p || p->params.empty())
             continue;
-        size_t nregs = a64 ? 8 : !x64 ? 0 : pe ? 4 : 6;
+        size_t nregs = a64 ? 8 : mips ? 4 : !x64 ? 0 : pe ? 4 : 6;
         std::vector<bool> done(p->params.size(), false);
+        // mips: the call's delay slot runs first, so an argument set there is the last writer
+        if (mips && call.next() < f.end) {
+            insn ds;
+            if (decode(call.next(), ds) && ds.kind == flow::normal && ds.nwr && ds.wr[0] >= 4 &&
+                ds.wr[0] < 8 && !ds.mem_write && (ds.wr[0] - 4) < done.size()) {
+                done[(size_t)(ds.wr[0] - 4)] = true;
+                arg_notes_[call.next()] = p->params[(size_t)(ds.wr[0] - 4)].name;
+            }
+        }
         int pushes = 0;
         for (size_t j = i; j-- > 0 && i - j <= 24;) {
             insn in;
@@ -579,13 +589,17 @@ void database::note_args(const function& f)
             if (a64) {
                 if (in.nwr && in.wr[0] < nregs && !in.mem_write) // x0..x7 (w0..w7)
                     arg = in.wr[0];
+            } else if (mips) {
+                if (in.nwr && in.wr[0] >= 4 && in.wr[0] < 8 && !in.mem_write) // a0..a3
+                    arg = in.wr[0] - 4;
             } else if (!x64 && std::string(in.mnem) == "push")
                 arg = pushes++;
             else if (in.mem_write && in.has_mem_op && !in.mem_index && in.mem_base) {
-                // a stack argument: [rsp + 0x20 + 8 * n] on win64, [rsp + 8 * n] on system v / x86
+                // a stack argument: [rsp + 0x20 + 8 * n] on win64, [rsp + 8 * n] on system v / x86,
+                // [sp + 16 + 4 * n] on mips o32 (the first four live in a0..a3)
                 std::string base = reg_name(in.mem_base);
-                if (base == "rsp" || base == "esp") {
-                    int64_t off = in.mem_disp - (x64 && pe ? 0x20 : 0);
+                if (base == "rsp" || base == "esp" || base == "$sp" || (mips && base == "sp")) {
+                    int64_t off = in.mem_disp - (x64 && pe ? 0x20 : mips ? 16 : 0);
                     int ptr = x64 ? 8 : 4;
                     if (off >= 0 && off % ptr == 0)
                         arg = (int)nregs + (int)(off / ptr);
