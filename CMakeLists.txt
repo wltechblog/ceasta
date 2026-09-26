@@ -86,6 +86,7 @@ add_library(ceasta_core STATIC
     src/core/dbg_trace.cpp
     src/core/debugger.cpp
     src/core/debugger_linux.cpp
+    src/core/debugger_remote.cpp
     src/core/debugger_steps.cpp
     src/core/decompiler.cpp
     src/core/diff.cpp

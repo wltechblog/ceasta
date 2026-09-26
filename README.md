@@ -86,7 +86,7 @@ grab it from the [releases page](https://github.com/ngwg/ceasta/releases):
 - a second decompiler if you want one: with [kuna](https://github.com/Noelo-Lab/kuna) installed (a decompiler ported from ghidra's), the pseudocode view gets a `kuna` switch — its output for the same function, lines linked to the listing, arm64 too. [more below](#second-decompiler-kuna)
 - file info: headers, security flags (aslr, dep, cfg / pie, nx, relro, canary / hardened runtime), md5 / sha256 / imphash, section entropy, resources, version info, a mac program's code signature and entitlements, and warnings when it looks packed
 - search everything (ctrl+f): functions, names, imports, exports, strings, comments and segments in one box, and the strings say where they're used
-- debugger (x86 / x64, windows and linux): start or attach, breakpoints (with conditions: `rdi == 3`), watchpoints on variables, step into / over / out, step back, run to cursor, pause, registers, stack, call stack, memory map, live memory
+- debugger (x86 / x64, windows and linux; mips under `qemu-mipsel`, set `CEASTA_ROOTFS` to the extracted firmware root): start or attach, breakpoints (with conditions: `rdi == 3`), watchpoints on variables, step into / over / out, step back, run to cursor, pause, registers, stack, call stack, memory map, live memory
   - the pseudocode marks the line you're stopped on
   - call a function in the running program (`call decrypt "..."`), record indirect call targets as xrefs (`trace`)
   - `ceasta-cli dbg`: the same debugger in a terminal
