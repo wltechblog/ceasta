@@ -322,6 +322,7 @@ void add_read_tools(std::vector<tool>& t)
             std::string file, why, name;
             uint64_t start = 0;
             bool ok = false;
+            std::vector<std::string> defines;
             s.run([&] {
                 database* db = need_db(s, out);
                 uint64_t a;
@@ -337,6 +338,7 @@ void add_read_tools(std::vector<tool>& t)
                     file = kuna_input(db->bin, why);
                 start = f->start;
                 name = db->location(f->start);
+                defines = kuna_define_args(*db);
                 ok = true;
             });
             if (!ok)
@@ -345,7 +347,7 @@ void add_read_tools(std::vector<tool>& t)
                 out = why;
                 return false;
             }
-            kuna_result k = kuna_decompile(s.opts.kuna, file, start, 120000, &s.stopping);
+            kuna_result k = kuna_decompile(s.opts.kuna, file, start, 120000, &s.stopping, defines);
             if (!k.ok) {
                 out = k.error;
                 return false;

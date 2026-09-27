@@ -49,6 +49,7 @@ struct remote_state {
     std::string exe_path;
     uint64_t exe_low = 0, exe_high = 0; // linked span of the loaded segments
     std::set<uint64_t> bps;
+    std::vector<debugger::watch> installed;
     std::string inbuf;
     std::vector<reg_value> regs;
     std::function<void(const std::string&)> log;
@@ -494,6 +495,19 @@ void poll(remote_state* r, uint32_t timeout_ms)
                 r->cont_sent = false;
                 r->st = dbg_state::stopped;
                 r->reason = stop_text(pkt, r);
+                for (const char* mark : {"watch:", "rwatch:", "awatch:"}) {
+                    size_t at = pkt.find(mark);
+                    if (at == std::string::npos)
+                        continue;
+                    uint64_t wa = strtoull(pkt.c_str() + at + strlen(mark), nullptr, 16);
+                    for (const debugger::watch& w : r->installed)
+                        if (w.addr == wa) {
+                            r->reason = debugger::watch_text(w);
+                            break;
+                        }
+                    if (r->reason.find("watchpoint") == 0)
+                        break;
+                }
                 if (r->over_bp) {
                     // that stop was our step over the breakpoint at the old pc: keep running
                     r->over_bp = false;
@@ -787,6 +801,41 @@ std::vector<dbg_module> modules(remote_state* r)
     m.size = r->exe_high - r->exe_low;
     out.push_back(m);
     return out;
+}
+
+// z2 watches writes, z3 reads, z4 both; the stub reports the hit in the stop reply
+bool apply_watches(remote_state* r, const std::vector<debugger::watch>& watches, std::string& err)
+{
+    if (!r)
+        return false;
+    for (const debugger::watch& w : r->installed) {
+        char p[64];
+        snprintf(p, sizeof(p), "z%d,%llx,%d", w.access ? 4 : 2, (unsigned long long)w.addr, w.size);
+        if (!send_packet(r, p)) {
+            err = "the gdb connection to qemu died";
+            return false;
+        }
+        std::string reply;
+        read_packet(r, reply, 2000);
+    }
+    r->installed.clear();
+    for (const debugger::watch& w : watches) {
+        char p[64];
+        snprintf(p, sizeof(p), "Z%d,%llx,%d", w.access ? 4 : 2, (unsigned long long)w.addr, w.size);
+        if (!send_packet(r, p)) {
+            err = "the gdb connection to qemu died";
+            return false;
+        }
+        std::string reply;
+        if (!read_packet(r, reply, 2000) || reply.empty() || reply[0] == 'E') {
+            // an empty reply: the mips stub has no watchpoints. say so instead of a silent no-op
+            err = reply.empty() ? "the emulator doesn't support watchpoints for mips programs"
+                                : util::fmt("qemu refused a watchpoint at %llx", (unsigned long long)w.addr);
+            return false;
+        }
+        r->installed.push_back(w);
+    }
+    return true;
 }
 
 } // namespace remote

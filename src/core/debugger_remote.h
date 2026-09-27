@@ -41,6 +41,7 @@ int exit_code(remote_state* r);
 std::string stop_reason(remote_state* r);
 std::vector<dbg_region> regions(remote_state* r);
 std::vector<dbg_module> modules(remote_state* r);
+bool apply_watches(remote_state* r, const std::vector<debugger::watch>& watches, std::string& err);
 
 } // namespace remote
 

@@ -5,11 +5,13 @@
 #include <vector>
 
 struct binary;
+class database;
 
 // kuna (github.com/Noelo-Lab/kuna), a decompiler ported from ghidra's, as an optional second
 // one. ceasta runs its command line tool when it's installed - nothing of it is built in - and
 // reads its json. kuna's addresses are the file's own, the same ones ceasta shows. it names
-// things itself: it doesn't know the names you gave them here.
+// things itself: the names you gave them here go over as --define-function arguments, so the
+// pseudocode speaks the same vocabulary as the listing.
 
 struct kuna_line {
     std::string text;
@@ -37,7 +39,11 @@ std::string kuna_unsupported(const binary& b);
 // "" when that can't be written (err says why)
 std::string kuna_input(const binary& b, std::string& err);
 
+// --define-function arguments carrying the database's named functions over to kuna
+std::vector<std::string> kuna_define_args(const database& db);
+
 // decompiles the function at addr of the program file with kuna, waiting up to timeout_ms.
-// a set cancel stops it
+// a set cancel stops it. extra args go on the command line after the file
 kuna_result kuna_decompile(const std::string& kuna, const std::string& file, uint64_t addr,
-    uint32_t timeout_ms = 120000, const std::atomic<bool>* cancel = nullptr);
+    uint32_t timeout_ms = 120000, const std::atomic<bool>* cancel = nullptr,
+    const std::vector<std::string>& extra_args = std::vector<std::string>());

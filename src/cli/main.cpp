@@ -452,7 +452,7 @@ int main(int argc, char** argv)
                 fprintf(stderr, "%s\n", why.c_str());
                 return 1;
             }
-            kuna_result k = kuna_decompile(exe, input, f->start);
+            kuna_result k = kuna_decompile(exe, input, f->start, 120000, nullptr, kuna_define_args(db));
             if (!k.ok) {
                 fprintf(stderr, "%s\n", k.error.c_str());
                 return 1;

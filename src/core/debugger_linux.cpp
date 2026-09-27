@@ -1237,10 +1237,8 @@ bool debugger::raw_call(uint64_t func, const std::vector<uint64_t>& args, uint64
 // changes a stopped thread's registers) and pick it up before they run on
 bool debugger::apply_watches(std::string& err)
 {
-    if (d->r) {
-        err = "watchpoints aren't available for emulated programs";
-        return false;
-    }
+    if (d->r)
+        return remote::apply_watches(d->r, active_watches(), err);
     if (d->state != dbg_state::stopped) {
         err = "stop the program first";
         return false;
