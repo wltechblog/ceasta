@@ -156,9 +156,12 @@ int cmd_mcp(int argc, char** argv)
         else if (a == "--http" && i + 1 < argc) {
             use_http = true;
             http = argv[++i];
-        } else if (a == "--raw32" || a == "--raw64" || a == "--raw-arm64") {
+        } else if (a == "--raw32" || a == "--raw64" || a == "--raw-arm64" || a == "--raw-mips") {
             opts.force_raw = true;
-            opts.raw_arch = a == "--raw32" ? bin_arch::x86 : a == "--raw64" ? bin_arch::x64 : bin_arch::arm64;
+            opts.raw_arch = a == "--raw32"   ? bin_arch::x86
+                          : a == "--raw64"   ? bin_arch::x64
+                          : a == "--raw-mips" ? bin_arch::mips
+                                              : bin_arch::arm64;
         } else if (a == "--arch" && i + 1 < argc) {
             opts.has_slice = true;
             if (!parse_arch(argv[++i], opts.slice)) {
