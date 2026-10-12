@@ -792,11 +792,11 @@ bool disassembler::decode_mips(const uint8_t* buf, size_t n, uint64_t addr, insn
         out.kind = flow::call;
         links = true;
         break;
-    case MIPS_INS_JALR:
+    case MIPS_INS_JALR: case MIPS_INS_JALR_HB:
         out.kind = flow::call;
         out.indirect = true;
         break;
-    case MIPS_INS_JR:
+    case MIPS_INS_JR: case MIPS_INS_JR_HB:
         // jr $ra ends a function
         out.kind = x.op_count == 1 && x.operands[0].type == MIPS_OP_REG && x.operands[0].reg == MIPS_REG_RA
                        ? flow::ret

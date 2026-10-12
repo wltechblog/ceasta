@@ -309,6 +309,12 @@ struct worker {
     {
         const segment* s = b.seg_at(slot);
         bool got = s && (s->name.compare(0, 4, ".got") == 0 || s->name == "__got" || s->name == "__auth_got");
+        // a raw dump has no section names: with $gp recovered, any word reachable as a signed
+        // 16 bit gp offset — the form every "lw x, off($gp)" the code emits takes
+        if (!got && b.format == bin_format::raw && gp_known) {
+            uint32_t d = (uint32_t)(slot - gp_value);
+            got = d >= (uint32_t)0xffff8000 || d < 0x8000;
+        }
         return got && !an.slot_import.count(slot) && b.read_ptr(slot, v) && v && b.is_mapped(v);
     }
 
@@ -1290,6 +1296,12 @@ struct worker {
                         add_func(in.target); // a tail call to an import stub
                     else
                         push_code(in.target);
+                } else if (mips && in.has_mem) {
+                    // a jr through a got slot with no import behind it: in a raw dump the
+                    // file's own pointer is the tail target (an elf resolves it as an import)
+                    uint64_t ptr;
+                    if (got_value(in.mem, ptr) && b.is_mapped(ptr))
+                        push_code(ptr);
                 } else if (arm) {
                     resolve_table_a64(hist, hbreg, hbreg2, hbcount, hseen, nh, in);
                     auto t = an.tables.find(in.addr);
@@ -1332,6 +1344,14 @@ struct worker {
             case flow::call:
                 if (in.has_target && !get_pc_call(in))
                     add_func(in.target);
+                else if (mips && in.indirect) {
+                    // pic call "lw t9, off(gp); jalr t9": mips_step records the slot in
+                    // in.mem. in a raw dump that slot's file value is the only way to reach
+                    // the callee — an elf would stop at the import boundary, this blob has none
+                    uint64_t ptr;
+                    if (in.has_mem && got_value(in.mem, ptr) && b.is_mapped(ptr))
+                        add_func(ptr);
+                }
                 if (is_noreturn_name(callee_name(in))) {
                     an.noret_calls.insert(in.addr);
                     stop = true;
@@ -1783,7 +1803,8 @@ struct worker {
                 }
                 uint64_t a = seg.start + i;
                 bool refd = reffed.count(a) != 0;
-                if (seg.exec() && !refd) {
+                // a raw dump has no sections, so "executable" says nothing: scan it like data
+                if (seg.exec() && b.format != bin_format::raw && !refd) {
                     i++;
                     continue;
                 }
@@ -1860,12 +1881,12 @@ struct worker {
 
         int ps = b.ptr_size();
         if (mips && b.mips_gp) {
-            // pic mips: $gp is the same constant in every function, and the loader knows it
+            // the loader answered (the raw blob ran the prologue vote): trust it
             gp_value = (uint32_t)b.mips_gp;
             gp_known = true;
-        } else if (mips && b.has_entry && b.format != bin_format::raw) {
-            // no loader answer (a raw blob or an odd file): read the lui / addiu pair at the
-            // entry, where the c runtime sets $gp up
+        } else if (mips) {
+            // no loader answer: read the lui / addiu pair at the entry, where the c runtime
+            // sets $gp up
             mips_state st0;
             uint64_t a = b.entry;
             for (int i = 0; i < 64; i++, a += 4) {
@@ -1891,6 +1912,23 @@ struct worker {
             if (range_free(slot, (uint32_t)ps)) {
                 mark_item(slot, (uint32_t)ps, fl_data);
                 an.data_sizes[slot] = (uint8_t)ps;
+            }
+        }
+        if (mips && gp_known && b.format == bin_format::raw) {
+            // no imports section: read the pointer table at $gp - 0x7ff0 ourselves, the same
+            // addresses an "lw x, off(gp)" would touch. marking them data lets a jr through a
+            // slot resolve to the function it points at. the window can hold null entries and
+            // slots pointing past the dump (bss, ram), so skip rather than stop at the first
+            uint32_t gp_base = gp_value - 0x7ff0;
+            for (uint32_t off = 0; off < 0x10000; off += 4) {
+                uint64_t slot = (gp_base + off) & mask;
+                uint64_t ptr;
+                if (!b.is_mapped(slot) || !b.read_ptr(slot, ptr) || !ptr || !b.is_mapped(ptr))
+                    continue; // padding, or a slot the runtime linker would fill
+                if (range_free(slot, (uint32_t)ps)) {
+                    mark_item(slot, (uint32_t)ps, fl_data);
+                    an.data_sizes[slot] = (uint8_t)ps;
+                }
             }
         }
         for (const symbol_entry& s : b.symbols)
@@ -1973,6 +2011,110 @@ struct worker {
     }
 };
 
+}
+
+// ---- mips pic detection for raw blobs ----
+
+// read one aligned mips32 word
+static uint32_t mips_word(const std::vector<uint8_t>& d, size_t off)
+{
+    return (uint32_t)d[off] | ((uint32_t)d[off + 1] << 8) | ((uint32_t)d[off + 2] << 16) |
+        ((uint32_t)d[off + 3] << 24);
+}
+
+// what a function start looks like for $gp purposes, one of:
+// 0 unknown, 1 "bal +8; .word gp; lw $gp,($ra)" (self-relative literal pool: the word the
+// bal's ra lands on holds the absolute gp value), 2 "lui $gp, hi" (classic, needs the %lo
+// addiu which may be far away), 3 "lui $gp, hi; addiu $gp, $gp, lo" (a complete pair)
+static int mips_prologue_kind(const std::vector<uint8_t>& d, size_t i, size_t words, uint32_t& hi)
+{
+    if (i + 4 > words)
+        return 0;
+    uint32_t w0 = mips_word(d, i * 4);
+    if (w0 == 0x04110002) { // bal with a +8 branch offset: ra = the next instruction
+        if (mips_word(d, i * 4 + 12) == 0x8ffc0000) { // lw $gp, 0($ra)
+            hi = mips_word(d, i * 4 + 8); // the word ra points at IS the gp value
+            return 1;
+        }
+        return 0;
+    }
+    if ((w0 & 0xffe00000) == 0x3c000000 && ((w0 >> 16) & 0x1f) == 28) { // lui $gp, imm
+        hi = (uint32_t)(w0 & 0xffff) << 16;
+        if (i + 2 <= words) {
+            uint32_t w1 = mips_word(d, i * 4 + 4);
+            if ((w1 & 0xffe00000) == 0x27000000 && ((w1 >> 16) & 0x1f) == 28 &&
+                ((w1 >> 21) & 0x1f) == 28) // addiu $gp, $gp, lo
+                return 3;
+        }
+        return 2;
+    }
+    return 0;
+}
+
+// how many words in [lo, lo + 0x10000) read as pointers into the image itself. a real
+// gp-anchored table is dense with them; a wrong guess lands in code or padding
+static int pointer_window_score(const std::vector<uint8_t>& d, uint64_t base, uint32_t lo)
+{
+    if (base > lo || lo - base + 0x10000 > d.size())
+        return 0;
+    size_t start = (size_t)(lo - base);
+    int n = 0;
+    for (uint32_t off = 0; off < 0x10000 && start + off + 4 <= d.size(); off += 4) {
+        uint32_t w = mips_word(d, start + off);
+        if (w >= (uint32_t)base && w - (uint32_t)base < d.size())
+            n++;
+    }
+    return n;
+}
+
+mips_pic detect_mips_pic(const std::vector<uint8_t>& blob, uint64_t base)
+{
+    mips_pic r;
+    if (blob.size() < 64)
+        return r;
+    std::map<uint32_t, int> votes1, votes2, votes3;
+    size_t words = blob.size() / 4;
+    for (size_t i = 0; i + 1 < words; i++) {
+        uint32_t hi = 0;
+        int k = mips_prologue_kind(blob, i, words, hi);
+        if (k == 1)
+            votes1[hi]++;
+        else if (k == 2)
+            votes2[hi]++;
+        else if (k == 3)
+            votes3[hi]++;
+    }
+    // a bal-stub vote is a four-word fingerprint (branch, pointer literal, gp load): one hit
+    // settles it. a lui/addiu pair is exact too. a lone lui high is common in data, so it only
+    // counts with several votes and a pointer-dense 64k window where the table would live
+    for (const std::map<uint32_t, int>* vs : {&votes1, &votes3}) {
+        for (const auto& v : *vs) {
+            if (v.second) {
+                r.found = true;
+                r.gp = v.first;
+                r.votes = v.second;
+                return r;
+            }
+        }
+    }
+    uint32_t best = 0;
+    int bestn = 0, bestscore = 0;
+    for (const auto& v : votes2) {
+        if (v.second < 3)
+            continue;
+        int score = pointer_window_score(blob, base, v.first);
+        if (score > bestscore) {
+            bestscore = score;
+            bestn = v.second;
+            best = v.first;
+        }
+    }
+    if (bestscore >= 32) {
+        r.found = true;
+        r.gp = best; // the %lo part is filled in later, off the real loads
+        r.votes = bestn;
+    }
+    return r;
 }
 
 bool analyze(const binary& b, analysis& out, analysis_progress* progress)

@@ -1389,6 +1389,31 @@ std::unique_ptr<database> open_database(const std::string& path, const load_opti
         if (!os::read_file(path, bytes, err))
             return nullptr;
         loader::raw(std::move(bytes), path, opts.raw_base, opts.raw_arch, db->bin);
+        // an entry override is often the only sane start for a raw blob (a pic stub at the
+        // base is one, but some dumps start mid-image)
+        if (opts.has_raw_entry && db->bin.has_entry) {
+            db->bin.entry = opts.raw_entry;
+            db->bin.func_hints.clear();
+            if (db->bin.is_mapped(opts.raw_entry))
+                db->bin.func_hints.push_back(opts.raw_entry);
+        }
+        // raw mips pic: the user's answer first, else vote on the prologues in the image.
+        // storing it in mips_gp turns on the elf paths: gp-known register state, got-like
+        // slot loads and jalr call resolution
+        if (opts.raw_arch == bin_arch::mips && !db->bin.mips_gp) {
+            if (opts.raw_gp) {
+                db->bin.mips_gp = opts.raw_gp;
+                db->bin.notes.push_back("mips pic: $gp from --gp");
+            } else if (db->bin.base) {
+                mips_pic pic = detect_mips_pic(db->bin.file, db->bin.base);
+                if (pic.found) {
+                    db->bin.mips_gp = pic.gp;
+                    db->bin.notes.push_back(util::fmt(
+                        "mips pic: $gp = 0x%x (from %d prologue%s, --gp overrides)", (uint32_t)pic.gp,
+                        pic.votes, pic.votes == 1 ? "" : "s"));
+                }
+            }
+        }
     } else {
         loader::options lo;
         lo.has_slice = opts.has_slice;

@@ -59,6 +59,8 @@ static void usage()
            "  --raw-arm64                   load the file as raw arm64 code\n"
            "  --raw-mips                    load the file as raw mips32 (little endian) code\n"
            "  --base <hex>                  base address for raw files\n"
+           "  --gp <hex>                    raw mips pic: the $gp value (default: auto-detect)\n"
+           "  --entry <hex>                 raw blob: entry point (default: the base address)\n"
            "  --arch x64|arm64              which part of a universal (fat) mach-o file to open\n"
            "                                (default: x64 when it has one, the decompiler reads it)\n"
            "  --kuna / --kuna-path <file>   decompile with kuna (github.com/Noelo-Lab/kuna) instead\n"
@@ -292,6 +294,17 @@ int main(int argc, char** argv)
                 fprintf(stderr, "bad base address\n");
                 return 2;
             }
+        } else if (a == "--gp" && i + 1 < argc) {
+            if (!util::parse_hex(argv[++i], opts.raw_gp)) {
+                fprintf(stderr, "bad gp value\n");
+                return 2;
+            }
+        } else if (a == "--entry" && i + 1 < argc) {
+            if (!util::parse_hex(argv[++i], opts.raw_entry)) {
+                fprintf(stderr, "bad entry address\n");
+                return 2;
+            }
+            opts.has_raw_entry = true;
         } else if (a == "--debug") {
             debug_mode = true;
         } else if (a == "-h" || a == "--help") {
