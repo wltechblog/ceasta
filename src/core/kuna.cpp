@@ -17,11 +17,23 @@ std::string kuna_find(const std::string& configured)
 
 std::string kuna_unsupported(const binary& b)
 {
-    if (b.format != bin_format::pe && b.format != bin_format::elf && b.format != bin_format::macho)
-        return "kuna reads pe, elf and mach-o files; this one was opened as raw code";
+    if (b.format != bin_format::pe && b.format != bin_format::elf && b.format != bin_format::macho &&
+        !(b.format == bin_format::raw && b.arch == bin_arch::mips))
+        return "kuna reads pe, elf and mach-o files, and raw mips dumps; this one was opened as some other raw code";
     if (b.path.empty() || !os::exists(b.path))
         return "the program isn't on disk for kuna to read";
     return std::string();
+}
+
+// how to load b in kuna when it isn't a pe / elf / mach-o: a raw mips dump gets kuna's own
+// raw loader (sleigh mips:LE:32 - ceasta's mips is little endian - at the dump's base), so
+// flash dumps and bootloader blobs decompile like elf files. "" ends the list
+std::vector<std::string> kuna_format_args(const binary& b)
+{
+    if (b.format == bin_format::raw && b.arch == bin_arch::mips)
+        return {"--raw-image", "--target", "MIPS:LE:32:default", "--base",
+                util::fmt("0x%llx", (unsigned long long)b.base)};
+    return {};
 }
 
 std::string kuna_input(const binary& b, std::string& err)

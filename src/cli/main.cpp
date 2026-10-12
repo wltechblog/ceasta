@@ -33,7 +33,7 @@ static void usage()
            "  strings <file>                strings found by the analysis\n"
            "  disasm <file> [where] [n]     n listing lines starting at where (default: entry)\n"
            "  func <file> <where>           listing of one function\n"
-           "  decompile <file> <where>      pseudocode for one function (--kuna: kuna's, when it's installed)\n"
+           "  decompile <file> <where>      pseudocode for one function (--kuna: kuna's, when it's installed; raw mips too)\n"
            "  graph <file> <where>          basic blocks and edges of a function\n"
            "  xrefs <file> <where>          references to an address\n"
            "  find <file> <pattern>         byte search, like \"48 8b ?? 05\"\n"
@@ -465,7 +465,10 @@ int main(int argc, char** argv)
                 fprintf(stderr, "%s\n", why.c_str());
                 return 1;
             }
-            kuna_result k = kuna_decompile(exe, input, f->start, 120000, nullptr, kuna_define_args(db));
+            std::vector<std::string> extra = kuna_define_args(db);
+            for (const std::string& a : kuna_format_args(b))
+                extra.push_back(a);
+            kuna_result k = kuna_decompile(exe, input, f->start, 120000, nullptr, extra);
             if (!k.ok) {
                 fprintf(stderr, "%s\n", k.error.c_str());
                 return 1;

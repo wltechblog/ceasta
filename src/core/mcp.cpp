@@ -313,7 +313,7 @@ void add_read_tools(std::vector<tool>& t)
 
     add("decompile_with_kuna",
         "The same function decompiled by kuna, a decompiler ported from Ghidra's that the user has installed. It is "
-        "often better than decompile_function on optimized code, and it also reads arm64. It names things itself "
+        "often better than decompile_function on optimized code, and it also reads arm64 and raw mips dumps. It names things itself "
         "(sub_401000, dat_404010, a0 for arguments), so renames and types set in ceasta don't show up here; its "
         "addresses are the same as ceasta's. Use it for a second opinion on a hard function.",
         schema({{"function", prop("string", "name or address of the function, or any address inside it")}},
@@ -324,7 +324,7 @@ void add_read_tools(std::vector<tool>& t)
             std::string file, why, name;
             uint64_t start = 0;
             bool ok = false;
-            std::vector<std::string> defines;
+            std::vector<std::string> defines, format_args;
             s.run([&] {
                 database* db = need_db(s, out);
                 uint64_t a;
@@ -341,6 +341,7 @@ void add_read_tools(std::vector<tool>& t)
                 start = f->start;
                 name = db->location(f->start);
                 defines = kuna_define_args(*db);
+                format_args = kuna_format_args(db->bin);
                 ok = true;
             });
             if (!ok)
@@ -349,6 +350,7 @@ void add_read_tools(std::vector<tool>& t)
                 out = why;
                 return false;
             }
+            defines.insert(defines.end(), format_args.begin(), format_args.end());
             kuna_result k = kuna_decompile(s.opts.kuna, file, start, 120000, &s.stopping, defines);
             if (!k.ok) {
                 out = k.error;

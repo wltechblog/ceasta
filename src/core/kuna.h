@@ -31,8 +31,13 @@ struct kuna_result {
 // PATH. "" when there isn't one
 std::string kuna_find(const std::string& configured = std::string());
 
-// why kuna can't read this file ("" when it can): it takes pe, elf and mach-o files from disk
+// why kuna can't read this file ("" when it can): it takes pe, elf and mach-o files from
+// disk, and raw mips dumps
 std::string kuna_unsupported(const binary& b);
+
+// how to load b in kuna when it isn't a pe / elf / mach-o (a raw mips dump: --raw-image with
+// the sleigh target and base). "" ends the list
+std::vector<std::string> kuna_format_args(const binary& b);
 
 // the file to give kuna for b: the program itself, or for a universal mach-o file the part
 // ceasta shows (so the addresses are the same), written out once to the user folder.

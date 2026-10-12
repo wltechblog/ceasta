@@ -178,7 +178,7 @@ ceasta-cli mcp file.exe             serve the file to an AI over MCP
 
 - install kuna the way its readme says and put `kuna` on your PATH, or point ceasta at it: view > second decompiler (kuna)...
 - the pseudocode view then has a `ceasta | kuna` switch. kuna's output is read-only and uses its own names (`sub_401000`, `dat_404010`), but its lines are linked to the listing like ceasta's, and a click on `sub_...` jumps there
-- it reads arm64 too, where ceasta's own decompiler stops
+- it reads arm64 and raw mips dumps too, where ceasta's own decompiler stops (a raw dump loads in kuna with its own raw loader, at the same base)
 - `ceasta-cli decompile file main --kuna` (or `--kuna-path /path/to/kuna`), and the AI gets a `decompile_with_kuna` tool
 
 ## connect an AI
