@@ -26,6 +26,9 @@ void mac_fix_menu();
 #include <string>
 #include <vector>
 
+// the same version test the imgui glfw backend uses
+#define CEASTA_GLFW_VERSION_COMBINED (GLFW_VERSION_MAJOR * 1000 + GLFW_VERSION_MINOR * 100 + GLFW_VERSION_REVISION)
+
 // one argument for sh: single quotes, with any ' inside closed, escaped and reopened
 static std::string shell_quote(const std::string& s)
 {
@@ -183,8 +186,20 @@ int main(int argc, char** argv)
     io.IniFilename = nullptr; // our own settings.ini lives in the user folder
 
     // 1 on macos, where the window works in points and a retina screen just has more pixels per
-    // point (imgui draws its fonts at that density); the monitor's scale on x11
-    float scale = ImGui_ImplGlfw_GetContentScaleForWindow(window);
+    // point (imgui draws its fonts at that density); the monitor's scale on x11; 1 on wayland,
+    // where the framebuffer carries the scaling. asked of glfw directly: the imgui helper looks the
+    // window up in the backend's map, which is only filled in by ImGui_ImplGlfw_InitForOpenGL below
+    float scale = 1.0f;
+#ifndef __APPLE__
+    bool wayland = false;
+#if CEASTA_GLFW_VERSION_COMBINED >= 3400
+    wayland = glfwGetPlatform() == GLFW_PLATFORM_WAYLAND;
+#endif
+    if (!wayland) {
+        float scale_y = 1.0f;
+        glfwGetWindowContentScale(window, &scale, &scale_y);
+    }
+#endif
     if (!(scale > 0))
         scale = 1.0f;
 
