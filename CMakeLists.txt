@@ -218,7 +218,7 @@ endif()
 # ---- install / package layout (what the installer ships) ----
 
 install(TARGETS ceasta-cli RUNTIME DESTINATION .)
-if(CEASTA_BUILD_GUI)
+if(TARGET ceasta)
     install(TARGETS ceasta RUNTIME DESTINATION .)
 endif()
 install(DIRECTORY plugins/ DESTINATION plugins)
